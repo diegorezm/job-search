@@ -145,11 +145,18 @@ fn handle_request(mut stream: TcpStream, queries: &db::Queries) {
 
         for job in jobs {
             let date = NaiveDate::parse_from_str(&job.date, "%d-%m-%Y").unwrap();
+            let delete_button = format!(
+                r#"<form action="/delete/{}" method="POST" class='delete-btn-form'>
+                    <button type="submit">Delete</button>
+                </form>"#,
+                job.id
+            );
             job_list.push_str("<tr>");
             job_list.push_str(&format!("<td>{}</td>", job.id));
             job_list.push_str(&format!("<td>{}</td>", job.title));
             job_list.push_str(&format!("<td>{}</td>", job.description));
             job_list.push_str(&format!("<td>{}</td>", date.format("%d/%m/%Y").to_string()));
+            job_list.push_str(&format!("<td>{}</td>", delete_button));
             job_list.push_str("</tr>");
         }
 
@@ -198,6 +205,13 @@ fn handle_request(mut stream: TcpStream, queries: &db::Queries) {
             r.len(),
             r
         );
+        stream.write_all(response.as_bytes()).unwrap();
+    } else if request_line.starts_with("POST /delete/") {
+        let first_line = lines.first().unwrap();
+        let id = first_line.split("POST /delete/").last().unwrap();
+        let id = id.split(" HTTP/1.1").next().unwrap().trim();
+        queries.remove_job(id.parse::<i32>().unwrap());
+        let response = "HTTP/1.1 303 See Other\r\nLocation: /\r\n\r\n";
         stream.write_all(response.as_bytes()).unwrap();
     } else {
         let response = format!(
