@@ -101,7 +101,7 @@ fn format_date(date: String) -> String {
         return Local::now().format("%d-%m-%Y").to_string();
     } else {
         let formatted_date = match NaiveDate::parse_from_str(&date, "%d-%m-%Y") {
-            Ok(date) => date.format("%b %d, %Y").to_string(),
+            Ok(date) => date.format("%d-%m-%Y").to_string(),
             Err(_) => "".to_string(),
         };
         if formatted_date.is_empty() {
