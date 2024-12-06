@@ -5,8 +5,9 @@ mod db;
 mod job;
 
 use std::{
+    collections::HashMap,
     fs::File,
-    io::{BufRead, BufReader, BufWriter},
+    io::{BufRead, BufReader, BufWriter, Read},
     net::{TcpListener, TcpStream},
     str::FromStr,
 };
@@ -86,22 +87,7 @@ struct SearchArgs {
     date: Option<String>,
 }
 
-fn serve_jobs(jobs: Vec<job::Job>) {
-    let mut job_list = String::new();
-
-    for job in jobs {
-        let date = NaiveDate::parse_from_str(&job.date, "%d-%m-%Y").unwrap();
-        job_list.push_str("<tr>");
-        job_list.push_str(&format!("<td>{}</td>", job.id));
-        job_list.push_str(&format!("<td>{}</td>", job.title));
-        job_list.push_str(&format!("<td>{}</td>", job.description));
-        job_list.push_str(&format!("<td>{}</td>", date.format("%d/%m/%Y").to_string()));
-        job_list.push_str("</tr>");
-    }
-
-    let html = include_str!("../static/index.html");
-    let content = String::from(html.replace("{content}", &job_list));
-
+fn serve_jobs(queries: &db::Queries) {
     let tcp = TcpListener::bind("127.0.0.1:8080")
         .map_err(|e| eprintln!("Error while binding to port: {}", e))
         .unwrap();
@@ -109,30 +95,73 @@ fn serve_jobs(jobs: Vec<job::Job>) {
     println!("Listening on http://127.0.0.1:8080");
     for stream in tcp.incoming() {
         match stream {
-            Ok(stream) => handle_request(stream, content.to_string()),
+            Ok(stream) => handle_request(stream, queries),
             Err(e) => eprintln!("Error while accepting connection: {}", e),
         }
     }
 }
 
-fn handle_request(mut stream: TcpStream, html: String) {
-    let buf_reader = BufReader::new(&stream);
-    let request_line = buf_reader
-        .lines()
-        .next()
-        .unwrap_or_else(|| {
-            eprintln!("Something went wrong while reading request line. Client probably forgot to add headers to request.");
-            return Ok("".to_string());
-        })
-        .unwrap();
+fn handle_request(mut stream: TcpStream, queries: &db::Queries) {
+    let mut buf_reader = BufReader::new(&stream);
+    let mut content_length = 0;
+    let mut lines = Vec::new();
+
+    // get the content length and the headers
+    // i don't need them in a hashmap, so i'll just store them as a string
+    for line_result in buf_reader.by_ref().lines() {
+        match line_result {
+            Ok(line) => {
+                if line.is_empty() {
+                    break;
+                }
+                if line.starts_with("Content-Length: ") {
+                    content_length = line
+                        .split("Content-Length: ")
+                        .last()
+                        .unwrap()
+                        .parse::<usize>()
+                        .unwrap();
+                }
+                lines.push(line);
+            }
+            Err(e) => eprintln!("Error while reading request line: {}", e),
+        }
+    }
+
+    let request_line = lines.join("\n");
+
+    // read the body if there is one
+    let mut body = String::new();
+    if content_length > 0 {
+        buf_reader
+            .take(content_length as u64)
+            .read_to_string(&mut body)
+            .expect("Failed to read request body");
+    }
 
     if request_line.starts_with("GET / HTTP/1.1") {
+        let jobs = queries.list_jobs();
+        let mut job_list = String::new();
+
+        for job in jobs {
+            let date = NaiveDate::parse_from_str(&job.date, "%d-%m-%Y").unwrap();
+            job_list.push_str("<tr>");
+            job_list.push_str(&format!("<td>{}</td>", job.id));
+            job_list.push_str(&format!("<td>{}</td>", job.title));
+            job_list.push_str(&format!("<td>{}</td>", job.description));
+            job_list.push_str(&format!("<td>{}</td>", date.format("%d/%m/%Y").to_string()));
+            job_list.push_str("</tr>");
+        }
+
+        let html = include_str!("../static/index.html");
+        let content = String::from(html.replace("{content}", &job_list));
+
         let status_line = "HTTP/1.1 200 OK";
         let response = format!(
             "{}\r\nContent-Type: text/html\r\nContent-Length: {}\r\n\r\n{}",
             status_line,
-            html.len(),
-            html
+            content.len(),
+            content
         );
         stream.write_all(response.as_bytes()).unwrap();
     } else if request_line.starts_with("GET /styles.css HTTP/1.1") {
@@ -141,6 +170,33 @@ fn handle_request(mut stream: TcpStream, html: String) {
             "HTTP/1.1 200 OK\r\nContent-Type: text/css\r\nContent-Length: {}\r\n\r\n{}",
             contents.len(),
             contents
+        );
+        stream.write_all(response.as_bytes()).unwrap();
+    } else if request_line.starts_with("GET /create HTTP/1.1") {
+        let contents = include_str!("../static/create.html");
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\n\r\n{}",
+            contents.len(),
+            contents
+        );
+        stream.write_all(response.as_bytes()).unwrap();
+    } else if request_line.starts_with("POST /create_job HTTP/1.1") {
+        let b: HashMap<String, String> = serde_json::from_str(&body).unwrap();
+
+        let title = b.get("title").unwrap();
+        let description = b.get("description").unwrap();
+
+        let date = format_date("today".to_string());
+
+        queries.add_job(title.to_string(), description.to_string(), date);
+
+        let r = format!("Job created successfully");
+
+        // Respond with 200 OK
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
+            r.len(),
+            r
         );
         stream.write_all(response.as_bytes()).unwrap();
     } else {
@@ -263,8 +319,7 @@ fn main() {
             println!("Job removed successfully");
         }
         Commands::Serve => {
-            let jobs = queries.list_jobs();
-            serve_jobs(jobs);
+            serve_jobs(&queries);
         }
         Commands::Export(args) => {
             let jobs = queries.list_jobs();
