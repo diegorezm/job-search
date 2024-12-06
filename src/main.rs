@@ -20,7 +20,6 @@ use std::io::Write;
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct App {
-    // List of commands
     #[command(subcommand)]
     cmd: Commands,
 }
@@ -109,13 +108,23 @@ fn serve_jobs(jobs: Vec<job::Job>) {
 
     println!("Listening on http://127.0.0.1:8080");
     for stream in tcp.incoming() {
-        handle_request(stream.unwrap(), content.to_string());
+        match stream {
+            Ok(stream) => handle_request(stream, content.to_string()),
+            Err(e) => eprintln!("Error while accepting connection: {}", e),
+        }
     }
 }
 
 fn handle_request(mut stream: TcpStream, html: String) {
     let buf_reader = BufReader::new(&stream);
-    let request_line = buf_reader.lines().next().unwrap().unwrap();
+    let request_line = buf_reader
+        .lines()
+        .next()
+        .unwrap_or_else(|| {
+            eprintln!("Something went wrong while reading request line. Client probably forgot to add headers to request.");
+            return Ok("".to_string());
+        })
+        .unwrap();
 
     if request_line.starts_with("GET / HTTP/1.1") {
         let status_line = "HTTP/1.1 200 OK";
@@ -132,6 +141,13 @@ fn handle_request(mut stream: TcpStream, html: String) {
             "HTTP/1.1 200 OK\r\nContent-Type: text/css\r\nContent-Length: {}\r\n\r\n{}",
             contents.len(),
             contents
+        );
+        stream.write_all(response.as_bytes()).unwrap();
+    } else {
+        let response = format!(
+            "HTTP/1.1 404 Not Found\r\nContent-Type: text/text\r\nContent-Length: {}\r\n\r\n{}",
+            "404 Not Found".len(),
+            "404 Not Found"
         );
         stream.write_all(response.as_bytes()).unwrap();
     }
