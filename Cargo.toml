@@ -1,0 +1,10 @@
+[package]
+name = "job_search"
+version = "1.0.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "4.5.22", features = ["derive"] }
+rusqlite = { version = "0.32.0" }
+prettytable-rs = "^0.10"
+chrono = "0.4.38"
