@@ -64,7 +64,7 @@ form {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
+  gap: 2rem;
   padding: 20px;
   border-radius: 5px;
   margin-top: 20px;
@@ -74,7 +74,7 @@ form {
   display: flex;
   flex-direction: column;
   width: 100%;
-  gap: 4px;
+  gap: 6px;
 
   label {
     font-size: 1.2em;
@@ -125,13 +125,16 @@ form {
   display: flex;
   justify-content: center;
   align-items: center;
+  height: fit-content;
+  width: fit-content;
+  margin: auto;
 
   button {
     border: none;
     background-color: #fe4a23;
     color: var(--secondary-color);
     height: 2.5rem;
-    width: 60%;
+    width: 4rem;
     text-decoration: none;
     border-radius: 5px;
 
@@ -140,4 +143,12 @@ form {
       opacity: 0.8;
     }
   }
+}
+
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
 }

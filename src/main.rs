@@ -206,12 +206,50 @@ fn handle_request(mut stream: TcpStream, queries: &db::Queries) {
             r
         );
         stream.write_all(response.as_bytes()).unwrap();
-    } else if request_line.starts_with("POST /delete/") {
+    } else if request_line.starts_with("POST /delete/ HTTP/1.1") {
         let first_line = lines.first().unwrap();
         let id = first_line.split("POST /delete/").last().unwrap();
         let id = id.split(" HTTP/1.1").next().unwrap().trim();
         queries.remove_job(id.parse::<i32>().unwrap());
         let response = "HTTP/1.1 303 See Other\r\nLocation: /\r\n\r\n";
+        stream.write_all(response.as_bytes()).unwrap();
+    } else if request_line.starts_with("POST /export HTTP/1.1") {
+        let b: HashMap<String, String> = serde_json::from_str(&body).unwrap();
+        let format = b.get("format").unwrap();
+        let content_type: String;
+        if format == "json" {
+            content_type = "application/json".to_string();
+        } else if format == "csv" {
+            content_type = "text/csv".to_string();
+        } else {
+            let response = format!(
+                "HTTP/1.1 400 Bad Request\r\nContent-Type: text/text\r\nContent-Length: {}\r\n\r\n{}",
+                "Invalid format".len(),
+                "Invalid format"
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+            return;
+        }
+
+        let jobs = queries.list_jobs();
+        let format = Format::from_str(format).map_err(|e| {
+            let response = format!(
+                "HTTP/1.1 400 Bad Request\r\nContent-Type: text/text\r\nContent-Length: {}\r\n\r\n{}",
+                e.len(),
+                e
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+            return;
+        }).unwrap();
+
+        let buf = export_jobs_to_bytes(jobs, format);
+
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\n\r\n{}",
+            content_type,
+            buf.len(),
+            String::from_utf8(buf).unwrap()
+        );
         stream.write_all(response.as_bytes()).unwrap();
     } else {
         let response = format!(
@@ -296,6 +334,44 @@ fn export_jobs(jobs: Vec<job::Job>, format: Format, file: &str) {
         }
     }
     println!("Jobs exported successfully to {}", file);
+}
+
+fn export_jobs_to_bytes(jobs: Vec<job::Job>, format: Format) -> Vec<u8> {
+    let mut buf = Vec::new();
+
+    match format {
+        Format::Json => {
+            let mut wtr = BufWriter::new(&mut buf);
+            writeln!(wtr, "[").expect("Error writing to file");
+            for (i, job) in jobs.iter().enumerate() {
+                let job_json = format!(
+                    r#"{{"id": {}, "title": "{}", "description": "{}", "date": "{}"}}"#,
+                    job.id, job.title, job.description, job.date
+                );
+
+                if i < jobs.len() - 1 {
+                    writeln!(wtr, "{},", job_json).expect("Error writing job to file");
+                } else {
+                    writeln!(wtr, "{}", job_json).expect("Error writing job to file");
+                }
+            }
+            writeln!(wtr, "]").expect("Error closing JSON array");
+        }
+        Format::Csv => {
+            let headers = vec!["id", "title", "description", "date"];
+            let mut wtr = csv::Writer::from_writer(&mut buf);
+            wtr.write_record(headers)
+                .map_err(|e| eprintln!("Error writing headers: {}", e))
+                .unwrap();
+            for job in jobs {
+                let row = vec![job.id.to_string(), job.title, job.description, job.date];
+                wtr.write_record(row)
+                    .map_err(|e| eprintln!("Error writing row: {}", e))
+                    .unwrap();
+            }
+        }
+    }
+    buf
 }
 
 fn main() {

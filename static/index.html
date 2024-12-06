@@ -10,9 +10,20 @@
 
 <body>
   <h1>Job Search</h1>
-  <a href="/create" class="btn" id="create-job-link">
-    create job
-  </a>
+  <div class="header">
+    <div>
+      <a href="/create" class="btn" id="create-job-link">
+        create job
+      </a>
+    </div>
+    <div>
+      <select name="export" id="export-select" class="btn">
+        <option value="json">JSON</option>
+        <option value="csv">CSV</option>
+      </select>
+    </div>
+  </div>
+
   <table>
     <thead>
       <tr>
@@ -27,6 +38,49 @@
       {content}
     </tbody>
   </table>
+
+
+  <script>
+    const exportSelect = document.getElementById("export-select");
+    exportSelect.addEventListener("change", async function () {
+      const exportFormat = exportSelect.value.toLowerCase();
+      const request = JSON.stringify({
+        format: exportFormat,
+      });
+
+      try {
+        const response = await fetch("/export", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: request,
+        });
+
+        if (!response.ok) {
+          throw new Error(`Failed to export: ${response.statusText}`);
+        }
+
+        const fileBlob = await response.blob();
+
+        const url = window.URL.createObjectURL(fileBlob);
+        const link = document.createElement("a");
+
+        link.href = url;
+        link.download = `jobs.${exportFormat}`;
+        link.style.display = "none";
+
+        document.body.appendChild(link);
+        link.click();
+
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
+      } catch (error) {
+        console.error("Error exporting jobs:", error);
+        alert("Failed to export jobs. Please try again.");
+      }
+    });
+  </script>
 </body>
 
 </html>
