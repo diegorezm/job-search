@@ -143,11 +143,11 @@ impl<'a> Queries<'a> {
         if let Some(date) = date {
             if !date.is_empty() {
                 let formatted_date = match chrono::NaiveDate::parse_from_str(&date, "%d-%m-%Y") {
-                    Ok(date) => date.format("%b %d, %Y").to_string(),
+                    Ok(date) => date.format("%d-%m-%Y").to_string(),
                     Err(_) => "".to_string(),
                 };
                 if !formatted_date.is_empty() {
-                    args.push(format!("date LIKE '%{}%'", formatted_date));
+                    args.push(format!("date='{}'", formatted_date));
                 } else {
                     eprintln!("Invalid date format. Please use the format dd-mm-yyyy.");
                 }
@@ -159,7 +159,7 @@ impl<'a> Queries<'a> {
             query.push_str(&args.join(" AND "));
         }
 
-        query.push_str(" ORDER BY id DESC");
+        query.push_str(" ORDER BY date ASC");
 
         let mut rows = self
             .conn
