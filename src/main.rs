@@ -206,7 +206,7 @@ fn handle_request(mut stream: TcpStream, queries: &db::Queries) {
             r
         );
         stream.write_all(response.as_bytes()).unwrap();
-    } else if request_line.starts_with("POST /delete/ HTTP/1.1") {
+    } else if request_line.starts_with("POST /delete/") {
         let first_line = lines.first().unwrap();
         let id = first_line.split("POST /delete/").last().unwrap();
         let id = id.split(" HTTP/1.1").next().unwrap().trim();
