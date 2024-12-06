@@ -4,7 +4,12 @@ extern crate prettytable;
 mod db;
 mod job;
 
-use std::{fs::File, io::BufWriter, str::FromStr};
+use std::{
+    fs::File,
+    io::{BufRead, BufReader, BufWriter},
+    net::{TcpListener, TcpStream},
+    str::FromStr,
+};
 
 use chrono::{Local, NaiveDate};
 use clap::{Args, Parser, Subcommand};
@@ -34,10 +39,12 @@ enum Commands {
     Search(SearchArgs),
     #[command(about = "Remove a job by its id")]
     Remove { id: i32 },
-    #[command(about = "Clear the database")]
-    Clear,
+    #[command(about = "Visualize jobs in a web browser.")]
+    Serve,
     #[command(about = "Export jobs to a file.")]
     Export(ExportArgs),
+    #[command(about = "Clear the database")]
+    Clear,
 }
 
 #[derive(Args, Debug)]
@@ -78,6 +85,56 @@ struct SearchArgs {
     description: Option<String>,
     #[arg(long, default_value = "")]
     date: Option<String>,
+}
+
+fn serve_jobs(jobs: Vec<job::Job>) {
+    let mut job_list = String::new();
+
+    for job in jobs {
+        let date = NaiveDate::parse_from_str(&job.date, "%d-%m-%Y").unwrap();
+        job_list.push_str("<tr>");
+        job_list.push_str(&format!("<td>{}</td>", job.id));
+        job_list.push_str(&format!("<td>{}</td>", job.title));
+        job_list.push_str(&format!("<td>{}</td>", job.description));
+        job_list.push_str(&format!("<td>{}</td>", date.format("%d/%m/%Y").to_string()));
+        job_list.push_str("</tr>");
+    }
+
+    let html = include_str!("../static/index.html");
+    let content = String::from(html.replace("{content}", &job_list));
+
+    let tcp = TcpListener::bind("127.0.0.1:8080")
+        .map_err(|e| eprintln!("Error while binding to port: {}", e))
+        .unwrap();
+
+    println!("Listening on http://127.0.0.1:8080");
+    for stream in tcp.incoming() {
+        handle_request(stream.unwrap(), content.to_string());
+    }
+}
+
+fn handle_request(mut stream: TcpStream, html: String) {
+    let buf_reader = BufReader::new(&stream);
+    let request_line = buf_reader.lines().next().unwrap().unwrap();
+
+    if request_line.starts_with("GET / HTTP/1.1") {
+        let status_line = "HTTP/1.1 200 OK";
+        let response = format!(
+            "{}\r\nContent-Type: text/html\r\nContent-Length: {}\r\n\r\n{}",
+            status_line,
+            html.len(),
+            html
+        );
+        stream.write_all(response.as_bytes()).unwrap();
+    } else if request_line.starts_with("GET /styles.css HTTP/1.1") {
+        let contents = include_str!("../static/styles.css");
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/css\r\nContent-Length: {}\r\n\r\n{}",
+            contents.len(),
+            contents
+        );
+        stream.write_all(response.as_bytes()).unwrap();
+    }
 }
 
 fn display_jobs(jobs: Vec<job::Job>) {
@@ -189,13 +246,17 @@ fn main() {
             queries.remove_job(id);
             println!("Job removed successfully");
         }
-        Commands::Clear => {
-            db.drop_db();
-            println!("Database cleared successfully");
+        Commands::Serve => {
+            let jobs = queries.list_jobs();
+            serve_jobs(jobs);
         }
         Commands::Export(args) => {
             let jobs = queries.list_jobs();
             export_jobs(jobs, args.format, args.file.as_str());
+        }
+        Commands::Clear => {
+            db.drop_db();
+            println!("Database cleared successfully");
         }
     }
 
